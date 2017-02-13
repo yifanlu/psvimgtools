@@ -4,29 +4,22 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 #include <fcntl.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
-#ifdef __linux__
 #include <time.h>
-#endif
 #include <unistd.h>
 #include <utime.h>
+#include <zlib.h>
 #include "aes.h"
+#include "endian-utils.h"
+#include "restore.h"
 #include "sha256.h"
 #include "psvimg.h"
 #include "utils.h"
 
 #define MAX_PATH_LEN 1024
-
-typedef struct args {
-  int in;
-  int out;
-  uint8_t key[32];
-  const char *prefix;
-} args_t;
 
 static void print_hash(const char *title, uint8_t hash[SHA256_MAC_LEN]) {
   fprintf(stderr, "%s: ", title);
@@ -42,7 +35,7 @@ void *decrypt_thread(void *pargs) {
   uint8_t iv[AES_BLOCK_SIZE];
   uint8_t next_iv[AES_BLOCK_SIZE];
   uint8_t hash[SHA256_MAC_LEN];
-  uint8_t buffer[PSVIMG_ENC_BLOCK_SIZE + SHA256_MAC_LEN];
+  uint8_t buffer[PSVIMG_BLOCK_SIZE + SHA256_MAC_LEN];
   ssize_t rd, total;
 
   // read iv
@@ -98,8 +91,8 @@ void *decrypt_thread(void *pargs) {
   uint64_t exp_total;
   uint32_t exp_padding;
 
-  exp_padding = *(uint32_t *)&buffer[rd-0x10];
-  exp_total = *(uint64_t *)&buffer[rd-0x8];
+  exp_padding = le32toh(*(uint32_t *)&buffer[rd-0x10]);
+  exp_total = le64toh(*(uint64_t *)&buffer[rd-0x8]);
   if (exp_total != total) {
     fprintf(stderr, "read size mismatch. expected: 0x%llx, actual: 0x%zx\n", exp_total, total);
     goto end;
@@ -126,6 +119,63 @@ end:
 void *decompress_thread(void *pargs) {
   args_t *args = (args_t *)pargs;
 
+  int ret;
+  unsigned have;
+  z_stream strm;
+  unsigned char in[PSVIMG_BLOCK_SIZE];
+  unsigned char out[PSVIMG_BLOCK_SIZE];
+  ssize_t rd;
+
+  /* allocate inflate state */
+  strm.zalloc = Z_NULL;
+  strm.zfree = Z_NULL;
+  strm.opaque = Z_NULL;
+  strm.avail_in = 0;
+  strm.next_in = Z_NULL;
+  ret = inflateInit(&strm);
+  if (ret != Z_OK) {
+    fprintf(stderr, "error init zlib\n");
+    goto end;
+  }
+
+  /* decompress until deflate stream ends or end of file */
+  do {
+    strm.avail_in = rd = read_block(args->in, in, sizeof(in));
+    if (rd < 0) {
+      fprintf(stderr, "error reading\n");
+      goto end;
+    }
+    if (strm.avail_in == 0)
+      break;
+    strm.next_in = in;
+
+    /* run inflate() on input until output buffer not full */
+    do {
+      strm.avail_out = PSVIMG_BLOCK_SIZE;
+      strm.next_out = out;
+      ret = inflate(&strm, Z_NO_FLUSH);
+      switch (ret) {
+      case Z_NEED_DICT:
+        ret = Z_DATA_ERROR;     /* and fall through */
+      case Z_DATA_ERROR:
+      case Z_MEM_ERROR:
+        fprintf(stderr, "error inflating (bad file?)\n");
+        (void)inflateEnd(&strm);
+        goto end;
+      }
+      have = PSVIMG_BLOCK_SIZE - strm.avail_out;
+      if (write_block(args->out, out, have) < have) {
+        fprintf(stderr, "error writing\n");
+        goto end;
+      }
+    } while (strm.avail_out == 0);
+
+    /* done when inflate() says it's done */
+  } while (ret != Z_STREAM_END);
+
+  /* clean up and return */
+  (void)inflateEnd(&strm);
+
 end:
   close(args->out);
   close(args->in);
@@ -151,15 +201,38 @@ static void sanatize_name(const char *bad, char *good, int len) {
 }
 
 static void scetime_to_tm(SceDateTime *sce, struct tm *tm) {
-  tm->tm_sec = sce->second;
-  tm->tm_min = sce->minute;
-  tm->tm_hour = sce->hour;
-  tm->tm_mday = sce->day;
-  tm->tm_mon = sce->month - 1;
-  tm->tm_year = sce->year - 1900;
+  tm->tm_sec = le16toh(sce->second);
+  tm->tm_min = le16toh(sce->minute);
+  tm->tm_hour = le16toh(sce->hour);
+  tm->tm_mday = le16toh(sce->day);
+  tm->tm_mon = le16toh(sce->month) - 1;
+  tm->tm_year = le16toh(sce->year) - 1900;
   tm->tm_wday = 0;
   tm->tm_yday = 0;
   tm->tm_isdst = 0;
+}
+
+static mode_t scemode_to_posix(int sce_mode) {
+  int mode = 0;
+  if ((sce_mode & SCE_S_IRUSR) == SCE_S_IRUSR) {
+    mode |= S_IRUSR;
+  }
+  if ((sce_mode & SCE_S_IWUSR) == SCE_S_IWUSR) {
+    mode |= S_IWUSR;
+  }
+  if ((sce_mode & SCE_S_IRGRP) == SCE_S_IRGRP) {
+    mode |= S_IRGRP;
+  }
+  if ((sce_mode & SCE_S_IWGRP) == SCE_S_IWGRP) {
+    mode |= S_IWGRP;
+  }
+  if ((sce_mode & SCE_S_IROTH) == SCE_S_IROTH) {
+    mode |= S_IROTH;
+  }
+  if ((sce_mode & SCE_S_IWOTH) == SCE_S_IWOTH) {
+    mode |= S_IWOTH;
+  }
+  return mode;
 }
 
 static void write_file(PsvImgHeader_t *header, char *data, const char *prefix) {
@@ -184,13 +257,16 @@ static void write_file(PsvImgHeader_t *header, char *data, const char *prefix) {
   }
 
   // create file
+  if (header->path_rel[0] == '\0') {
+    strcpy(header->path_rel, "VITA_DATA.BIN");
+  }
   snprintf(full_path, MAX_PATH_LEN, "%s/%s", full_parent, header->path_rel);
-  if (SCE_S_ISREG(header->stat.sst_mode)) {
-    fd = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    write_block(fd, data, header->stat.sst_size);
+  if (SCE_S_ISREG(le32toh(header->stat.sst_mode))) {
+    fd = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, scemode_to_posix(le32toh(header->stat.sst_mode)));
+    write_block(fd, data, le64toh(header->stat.sst_size));
     close(fd);
   } else {
-    mkdir(full_path, 0700);
+    mkdir(full_path, scemode_to_posix(le32toh(header->stat.sst_mode)));
   }
 
   // set creation time
@@ -210,9 +286,14 @@ void *unpack_thread(void *pargs) {
   uint64_t fsize;
 
   while (read_block(args->in, &header, sizeof(header)) > 0) {
-    if (SCE_S_ISREG(header.stat.sst_mode)) {
-      fsize = header.stat.sst_size;
-      printf("creating file %s%s (%llx bytes)...\n", header.path_parent, header.path_rel, header.stat.sst_size);
+    if (memcmp(header.end, PSVIMG_ENDOFHEADER, sizeof(header.end)) != 0) {
+      fprintf(stderr, "invalid header (bad file?)\n");
+      goto end;
+    }
+
+    if (SCE_S_ISREG(le32toh(header.stat.sst_mode))) {
+      fsize = le64toh(header.stat.sst_size);
+      printf("creating file %s%s (%llx bytes)...\n", header.path_parent, header.path_rel, fsize);
     } else {
       fsize = 0;
       printf("creating directory %s%s...\n", header.path_parent, header.path_rel);
@@ -246,45 +327,15 @@ void *unpack_thread(void *pargs) {
       fprintf(stderr, "error reading tailer\n");
       goto end;
     }
+
+    if (memcmp(tailer.end, PSVIMG_ENDOFTAILER, sizeof(tailer.end)) != 0) {
+      fprintf(stderr, "invalid tailer (bad file?)\n");
+      goto end;
+    }
   }
   
 end:
   close(args->out);
   close(args->in);
   return NULL;
-}
-
-int main(int argc, const char *argv[]) {
-  args_t args1, args2;
-  struct stat st;
-  int fds[2];
-  if (argc < 5) {
-    fprintf(stderr, "usage: psvimg-extract -K key input.psvimg outputdir");
-    perror("args");
-    return 1;
-  }
-
-  pipe(fds);
-  args1.in = open(argv[3], O_RDONLY);
-  args1.out = fds[1];
-  args2.in = fds[0];
-  args2.out = 0;
-
-  parse_key(argv[2], args1.key);
-  args2.prefix = argv[4];
-  if (stat(args2.prefix, &st) < 0) {
-    mkdir(args2.prefix, 0700);
-  }
-
-  pthread_t t1, t2;
-
-  pthread_create(&t1, NULL, decrypt_thread, &args1);
-  pthread_create(&t2, NULL, unpack_thread, &args2);
-
-  pthread_join(t1, NULL);
-  pthread_join(t2, NULL);
-
-  fprintf(stderr, "all done.\n");
-
-  return 0;
 }

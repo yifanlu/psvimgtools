@@ -39,11 +39,20 @@ ssize_t write_block(int fd, const void *buf, size_t nbyte) {
   }
 }
 
-void parse_key(const char *ascii, uint8_t key[0x20]) {
-  for (int i = 0; i < 0x20; i++) {
+int parse_key(const char *ascii, uint8_t key[0x20]) {
+  int i;
+  for (i = 0; i < 0x20; i++) {
     char byte[3];
     memcpy(byte, &ascii[2*i], 2);
     byte[2] = '\0';
     key[i] = strtol(byte, NULL, 16);
+    if (key[i] == 0 && !(byte[0] == '0' && byte[1] == '0')) {
+      return -1;
+    }
+  }
+  if (ascii[2*i] != '\0') {
+    return -1;
+  } else {
+    return 0;
   }
 }

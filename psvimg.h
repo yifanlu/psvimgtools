@@ -6,6 +6,8 @@
 #ifndef PSVIMG_H__
 #define PSVIMG_H__
 
+#include <stdint.h>
+
 #define PSVMD_VER1_MAGIC (0xFEE1900D)
 #define PSVMD_VER2_MAGIC (0xFEE1900E)
 #define PSVIMG_ENDOFHEADER "EndOfHeader\n"
@@ -14,7 +16,7 @@
 #define PSVIMG_TAILER_FILLER ('z')
 #define PSVIMG_PADDING_FILLER ('+')
 #define PSVIMG_ENTRY_ALIGN (0x400)
-#define PSVIMG_ENC_BLOCK_SIZE (0x8000)
+#define PSVIMG_BLOCK_SIZE (0x8000)
 
 /** Access modes for st_mode in SceIoStat (confirm?). */
 enum {
