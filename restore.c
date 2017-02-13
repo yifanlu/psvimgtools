@@ -252,7 +252,7 @@ static void write_file(PsvImgHeader_t *header, char *data, const char *prefix) {
     mkdir(full_parent, 0700);
     snprintf(full_path, MAX_PATH_LEN, "%s/%s", full_parent, "VITA_PATH.TXT");
     fd = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    write_block(fd, header->path_parent, strnlen(header->path_parent, 256));
+    write_block(fd, header->path_parent, strnlen(header->path_parent, 256)+1);
     close(fd);
   }
 
@@ -266,7 +266,7 @@ static void write_file(PsvImgHeader_t *header, char *data, const char *prefix) {
     write_block(fd, data, le64toh(header->stat.sst_size));
     close(fd);
   } else {
-    mkdir(full_path, scemode_to_posix(le32toh(header->stat.sst_mode)));
+    mkdir(full_path, scemode_to_posix(le32toh(header->stat.sst_mode)) | S_IXUSR);
   }
 
   // set creation time

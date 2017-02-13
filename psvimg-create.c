@@ -152,8 +152,15 @@ int main(int argc, const char *argv[]) {
     args2.iv[i] = rand() % 0xFF;
   }
 
+  pthread_create(&t1, NULL, compress_thread, &args1);
+  pthread_create(&t2, NULL, encrypt_thread, &args2);
+  
   write_block(fds[1], &md, sizeof(md));
   close(fds[1]);
+
+  pthread_join(t1, NULL);
+  pthread_join(t2, NULL);
+  
   fprintf(stderr, "created %s\n", path);
 
   // finally create the psvinf

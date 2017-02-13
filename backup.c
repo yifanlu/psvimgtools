@@ -84,7 +84,7 @@ void *encrypt_thread(void *pargs) {
   // send footer
   footer.data.padding = htole32(footer.data.padding);
   footer.data.total = htole64(footer.data.total);
-  aes256_cbc_encrypt(footer.raw, args->key, iv, AES_BLOCK_SIZE);
+  aes256_cbc_encrypt(footer.raw, args->key, iv, 1);
   write_block(args->out, footer.raw, AES_BLOCK_SIZE);
 
 end:
@@ -96,7 +96,7 @@ end:
 void *compress_thread(void *pargs) {
   args_t *args = (args_t *)pargs;
 
-  int ret, flush;
+  int ret;
   unsigned have;
   z_stream strm;
   unsigned char in[PSVIMG_BLOCK_SIZE];
@@ -144,11 +144,14 @@ void *compress_thread(void *pargs) {
     }
 
     /* done when last data in file processed */
-  } while (flush != Z_FINISH);
-  strm.avail_in = 0;
-  strm.avail_out = 0;
+  } while (rd > 0);
   if (deflate(&strm, Z_FINISH) == Z_STREAM_ERROR) {  /* state not clobbered */
     fprintf(stderr, "zlib internal error\n");
+    goto end;
+  }
+  have = PSVIMG_BLOCK_SIZE - strm.avail_out;
+  if (write_block(args->out, out, have) < have) {
+    fprintf(stderr, "error writing\n");
     goto end;
   }
 
@@ -162,14 +165,18 @@ end:
 }
 
 static void time_to_scetime(const time_t *time, SceDateTime *sce) {
-  struct tm *tm;
-  tm = localtime(time);
-  sce->second = htole32(tm->tm_sec);
-  sce->minute = htole32(tm->tm_min);
-  sce->hour = htole32(tm->tm_hour);
-  sce->day = htole32(tm->tm_mday);
-  sce->month = htole32(tm->tm_mon) + 1;
-  sce->year = htole32(tm->tm_year) + 1900;
+  struct tm tm, *tmp;
+  /*
+  tmp = localtime_r(time, &tm);
+  sce->second = htole32(tmp->tm_sec);
+  sce->minute = htole32(tmp->tm_min);
+  sce->hour = htole32(tmp->tm_hour);
+  sce->day = htole32(tmp->tm_mday);
+  sce->month = htole32(tmp->tm_mon) + 1;
+  sce->year = htole32(tmp->tm_year) + 1900;
+  sce->microsecond = htole32(0);
+  */
+  memset(sce, 0, sizeof(*sce));
 }
 
 static int scestat(const char *path, SceIoStat *sce) {
@@ -214,23 +221,24 @@ static int scestat(const char *path, SceIoStat *sce) {
   return 0;
 }
 
+static ssize_t add_all_files(int fd, const char *parent, const char *rel, const char *host);
+
 static ssize_t add_file(int fd, const char *parent, const char *rel, const char *host) {
   PsvImgHeader_t header;
   PsvImgTailer_t tailer;
-  char host_path[MAX_PATH_LEN];
   uint64_t fsize;
   char *buffer;
   int file;
   int padding;
 
-  memset(&tailer, PSVIMG_TAILER_FILLER, sizeof(tailer));
-  snprintf(host_path, sizeof(host_path), "%s/%s", host, rel);
-
   // create header
   memset(&header, PSVIMG_HEADER_FILLER, sizeof(header));
   header.systime = htole64(0);
   header.unk_8 = htole64(0);
-  scestat(host_path, &header.stat);
+  if (scestat(host, &header.stat) < 0) {
+    fprintf(stderr, "error getting stat for %s\n", host);
+    return -1;
+  }
   strncpy(header.path_parent, parent, sizeof(header.path_parent));
   header.unk_16C = htole32(1);
   strncpy(header.path_rel, rel, sizeof(header.path_rel));
@@ -243,9 +251,9 @@ static ssize_t add_file(int fd, const char *parent, const char *rel, const char 
   if (SCE_S_ISREG(le32toh(header.stat.sst_mode))) {
     fsize = le64toh(header.stat.sst_size);
     printf("packing file %s%s (%llx bytes)...\n", header.path_parent, header.path_rel, fsize);
-    file = open(host_path, O_RDONLY);
+    file = open(host, O_RDONLY);
     if (file < 0) {
-      fprintf(stderr, "error opening %s\n", host_path);
+      fprintf(stderr, "error opening %s\n", host);
       return -1;
     }
     buffer = malloc(fsize);
@@ -254,7 +262,7 @@ static ssize_t add_file(int fd, const char *parent, const char *rel, const char 
       return -1;
     }
     if (read_block(file, buffer, fsize) < fsize) {
-      fprintf(stderr, "error reading %s\n", host_path);
+      fprintf(stderr, "error reading %s\n", host);
       close(file);
       free(buffer);
       return -1;
@@ -264,7 +272,6 @@ static ssize_t add_file(int fd, const char *parent, const char *rel, const char 
     free(buffer);
   } else {
     fsize = 0;
-    printf("packing directory %s%s...\n", header.path_parent, header.path_rel);
   }
 
   // send padding
@@ -284,7 +291,12 @@ static ssize_t add_file(int fd, const char *parent, const char *rel, const char 
   tailer.unk_0 = htole64(0);
   memcpy(tailer.end, PSVIMG_ENDOFTAILER, sizeof(tailer.end));
 
-  return (ssize_t)fsize;
+  if (SCE_S_ISDIR(le32toh(header.stat.sst_mode))) {
+    printf("packing directory %s%s...\n", header.path_parent, header.path_rel);
+    return add_all_files(fd, parent, rel, host);
+  } else {
+    return (ssize_t)fsize;
+  }
 }
 
 static ssize_t add_all_files(int fd, const char *parent, const char *rel, const char *host) {
@@ -292,7 +304,6 @@ static ssize_t add_all_files(int fd, const char *parent, const char *rel, const 
   char new_host[MAX_PATH_LEN];
   DIR *dir;
   struct dirent *dent;
-  struct stat st;
   ssize_t fsize, total;
 
   if ((dir = opendir(host)) == NULL) {
@@ -311,7 +322,7 @@ static ssize_t add_all_files(int fd, const char *parent, const char *rel, const 
       continue;
     }
 
-    if (strcmp(dent->d_name, "VITA_DATA.BIN") == 0) { // special file
+    if (rel[0] == '\0' && strcmp(dent->d_name, "VITA_DATA.BIN") == 0) { // special file
       new_rel[0] = '\0';
     } else {
       if (snprintf(new_rel, sizeof(new_rel), "%s/%s", rel, dent->d_name) == sizeof(new_rel)) {
@@ -326,17 +337,6 @@ static ssize_t add_all_files(int fd, const char *parent, const char *rel, const 
       goto err;
     }
     total += fsize;
-
-    // recurse for directories
-    if (stat(new_host, &st) < 0) {
-      fprintf(stderr, "internal error\n");
-      goto err;
-    }
-    if (S_ISDIR(st.st_mode)) {
-      if (add_all_files(fd, parent, new_rel, new_host) < 0) {
-        goto err;
-      }
-    }
   }
 
   closedir(dir);
@@ -387,7 +387,7 @@ void *pack_thread(void *pargs) {
       }
       close(fd);
       printf("adding files for %s\n", parent);
-      if ((wr = add_all_files(fd, parent, "\0", host)) < 0) {
+      if ((wr = add_all_files(args->out, parent, "\0", host)) < 0) {
         goto end;
       }
       args->content_size += wr;
