@@ -82,6 +82,7 @@ void *encrypt_thread(void *pargs) {
   }
 
   // send footer
+  footer.data.total += 0x10;
   footer.data.padding = htole32(footer.data.padding);
   footer.data.total = htole64(footer.data.total);
   aes256_cbc_encrypt(footer.raw, args->key, iv, 1);
@@ -165,9 +166,8 @@ end:
 }
 
 static void time_to_scetime(const time_t *time, SceDateTime *sce) {
-  struct tm tm, *tmp;
-  /*
-  tmp = localtime_r(time, &tm);
+  struct tm *tmp;
+  tmp = gmtime(time);
   sce->second = htole32(tmp->tm_sec);
   sce->minute = htole32(tmp->tm_min);
   sce->hour = htole32(tmp->tm_hour);
@@ -175,7 +175,6 @@ static void time_to_scetime(const time_t *time, SceDateTime *sce) {
   sce->month = htole32(tmp->tm_mon) + 1;
   sce->year = htole32(tmp->tm_year) + 1900;
   sce->microsecond = htole32(0);
-  */
   memset(sce, 0, sizeof(*sce));
 }
 
@@ -332,6 +331,7 @@ static ssize_t add_all_files(int fd, const char *parent, const char *rel, const 
     }
     snprintf(new_host, sizeof(new_host), "%s/%s", host, dent->d_name);
 
+    dent = NULL; // so we don't actually reuse it
     // add file/directory to psvimg
     if ((fsize = add_file(fd, parent, new_rel, new_host)) < 0) {
       goto err;
@@ -353,7 +353,6 @@ void *pack_thread(void *pargs) {
   struct dirent *dent;
   struct stat st;
   char parent[256];
-  char rel[256];
   char host[MAX_PATH_LEN];
   char parent_file[MAX_PATH_LEN];
   int fd;
@@ -386,6 +385,7 @@ void *pack_thread(void *pargs) {
         goto end;
       }
       close(fd);
+      dent = NULL; // so we don't actually reuse it
       printf("adding files for %s\n", parent);
       if ((wr = add_all_files(args->out, parent, "\0", host)) < 0) {
         goto end;

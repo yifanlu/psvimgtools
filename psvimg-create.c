@@ -4,12 +4,13 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 #include <fcntl.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include "backup.h"
 #include "psvimg.h"
@@ -38,7 +39,8 @@ int main(int argc, const char *argv[]) {
   char path[MAX_PATH_LEN];
   int mfd;
   PsvMd_t md;
-  pthread_t t1, t2;
+  pid_t pid;
+  int status;
 
   if (argc < 7) {
     fprintf(stderr, "usage: psvimg-create [-m metadata|-n name] -K key inputdir outputdir\n");
@@ -113,11 +115,29 @@ int main(int argc, const char *argv[]) {
 
   memcpy(args2.iv, md.iv, sizeof(args2.iv));
 
-  pthread_create(&t1, NULL, pack_thread, &args1);
-  pthread_create(&t2, NULL, encrypt_thread, &args2);
+  if ((pid = fork()) == 0) {
+    close(args1.in);
+    close(args1.out);
+    encrypt_thread(&args2);
+    return 0;
+  } else if (pid > 0) {
+    close(args2.in);
+    close(args2.out);
+    pack_thread(&args1);
+  } else {
+    perror("fork");
+    return 1;
+  }
 
-  pthread_join(t1, NULL);
-  pthread_join(t2, NULL);
+  if (waitpid(pid, &status, 0) < 0) {
+    perror("waitpid");
+    return 1;
+  }
+
+  if (!WIFEXITED(status)) {
+    fprintf(stderr, "child process returned error\n");
+    return 1;
+  }
 
   if (stat(path, &st) < 0) {
     perror("stat");
@@ -152,14 +172,39 @@ int main(int argc, const char *argv[]) {
     args2.iv[i] = rand() % 0xFF;
   }
 
-  pthread_create(&t1, NULL, compress_thread, &args1);
-  pthread_create(&t2, NULL, encrypt_thread, &args2);
-  
-  write_block(fds[1], &md, sizeof(md));
-  close(fds[1]);
+  if ((pid = fork()) == 0) {
+    close(args1.in);
+    close(args1.out);
+    if ((pid = fork()) == 0) {
+      close(args2.in);
+      close(args2.out);
+      write_block(fds[1], &md, sizeof(md));
+      close(fds[1]);
+      return 0;
+    } else {
+      close(fds[1]);
+    }
+    encrypt_thread(&args2);
+    return 0;
+  } else if (pid > 0) {
+    close(fds[1]);
+    close(args2.in);
+    close(args2.out);
+    compress_thread(&args1);
+  } else {
+    perror("fork");
+    return 1;
+  }
 
-  pthread_join(t1, NULL);
-  pthread_join(t2, NULL);
+  if (waitpid(pid, &status, 0) < 0) {
+    perror("waitpid");
+    return 1;
+  }
+
+  if (!WIFEXITED(status)) {
+    fprintf(stderr, "child process returned error\n");
+    return 1;
+  }
   
   fprintf(stderr, "created %s\n", path);
 
