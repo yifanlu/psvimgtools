@@ -39,7 +39,7 @@ void *encrypt_thread(void *pargs) {
   } footer;
 
   // write iv
-  write_block(args->in, args->iv, AES_BLOCK_SIZE);
+  write_block(args->out, args->iv, AES_BLOCK_SIZE);
   memcpy(iv, args->iv, AES_BLOCK_SIZE);
 
   // encrypt blocks
@@ -167,7 +167,7 @@ end:
 
 static void time_to_scetime(const time_t *time, SceDateTime *sce) {
   struct tm *tmp;
-  tmp = gmtime(time);
+  tmp = localtime(time);
   sce->second = htole32(tmp->tm_sec);
   sce->minute = htole32(tmp->tm_min);
   sce->hour = htole32(tmp->tm_hour);
@@ -255,20 +255,12 @@ static ssize_t add_file(int fd, const char *parent, const char *rel, const char 
       fprintf(stderr, "error opening %s\n", host);
       return -1;
     }
-    buffer = malloc(fsize);
-    if (buffer == NULL) {
-      fprintf(stderr, "out of memory\n");
-      return -1;
-    }
-    if (read_block(file, buffer, fsize) < fsize) {
-      fprintf(stderr, "error reading %s\n", host);
+    if (copy_block(fd, file, fsize) < fsize) {
+      fprintf(stderr, "error writing file data\n");
       close(file);
-      free(buffer);
       return -1;
     }
     close(file);
-    write_block(fd, buffer, fsize);
-    free(buffer);
   } else {
     fsize = 0;
   }
@@ -279,16 +271,16 @@ static ssize_t add_file(int fd, const char *parent, const char *rel, const char 
   } else {
     padding = 0;
   }
-  buffer = malloc(padding);
-  memset(buffer, PSVIMG_PADDING_FILLER, padding);
-  buffer[padding-1] = '\n';
-  write_block(fd, buffer, padding);
-  free(buffer);
+  while (padding --> 0) {
+    char ch = (padding == 0) ? '\n' : PSVIMG_PADDING_FILLER;
+    write_block(fd, &ch, 1);
+  }
 
   // send tailer
   memset(&tailer, PSVIMG_TAILER_FILLER, sizeof(tailer));
   tailer.unk_0 = htole64(0);
   memcpy(tailer.end, PSVIMG_ENDOFTAILER, sizeof(tailer.end));
+  write_block(fd, &tailer, sizeof(tailer));
 
   if (SCE_S_ISDIR(le32toh(header.stat.sst_mode))) {
     printf("packing directory %s%s...\n", header.path_parent, header.path_rel);

@@ -69,7 +69,7 @@ void *decrypt_thread(void *pargs) {
     tmp = ctx;
     sha256_final(&tmp, hash);
     if (memcmp(&buffer[rd-SHA256_MAC_LEN], hash, SHA256_MAC_LEN) != 0) {
-      fprintf(stderr, "hash mismatch at offset 0x%zx, (buffer size 0x%zx)\n", total - SHA256_MAC_LEN, rd);
+      fprintf(stderr, "hash mismatch at offset 0x%zx, (buffer size 0x%zx)\n", total + rd - SHA256_MAC_LEN, rd);
       print_hash("expected", &buffer[rd-SHA256_MAC_LEN]);
       print_hash("actual", hash);
       goto end;
@@ -102,7 +102,7 @@ void *decrypt_thread(void *pargs) {
   tmp = ctx;
   sha256_final(&tmp, hash);
   if (memcmp(&buffer[rd-SHA256_MAC_LEN-exp_padding], hash, SHA256_MAC_LEN) != 0) {
-    fprintf(stderr, "hash mismatch at offset 0x%lx, (buffer size 0x%zx)\n", total - SHA256_MAC_LEN - exp_padding, rd);
+    fprintf(stderr, "hash mismatch at offset 0x%lx (final block), (buffer size 0x%zx)\n", total + rd - SHA256_MAC_LEN - exp_padding, rd);
     print_hash("expected", &buffer[rd-SHA256_MAC_LEN]);
     print_hash("actual", hash);
     goto end;
@@ -235,7 +235,7 @@ static mode_t scemode_to_posix(int sce_mode) {
   return mode;
 }
 
-static void write_file(PsvImgHeader_t *header, char *data, const char *prefix) {
+static int write_file(PsvImgHeader_t *header, int in_fd, const char *prefix) {
   char good_parent[256];
   char full_parent[MAX_PATH_LEN];
   char full_path[MAX_PATH_LEN];
@@ -263,10 +263,17 @@ static void write_file(PsvImgHeader_t *header, char *data, const char *prefix) {
   snprintf(full_path, MAX_PATH_LEN, "%s/%s", full_parent, header->path_rel);
   if (SCE_S_ISREG(le32toh(header->stat.sst_mode))) {
     fd = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, scemode_to_posix(le32toh(header->stat.sst_mode)));
-    write_block(fd, data, le64toh(header->stat.sst_size));
+    if (copy_block(fd, in_fd, le64toh(header->stat.sst_size)) < le64toh(header->stat.sst_size)) {
+      fprintf(stderr, "error extracting %s\n", full_path);
+      close(fd);
+      return -1;
+    }
     close(fd);
   } else {
-    mkdir(full_path, scemode_to_posix(le32toh(header->stat.sst_mode)) | S_IXUSR);
+    if (mkdir(full_path, scemode_to_posix(le32toh(header->stat.sst_mode)) | S_IXUSR) < 0) {
+      fprintf(stderr, "error creating %s\n", full_path);
+      return -1;
+    }
   }
 
   // set creation time
@@ -274,7 +281,12 @@ static void write_file(PsvImgHeader_t *header, char *data, const char *prefix) {
   times.actime = mktime(&tm);
   scetime_to_tm(&header->stat.sst_mtime, &tm);
   times.modtime = mktime(&tm);
-  utime(full_path, &times);
+  if (utime(full_path, &times) < 0) {
+    fprintf(stderr, "error setting time\n");
+    return -1;
+  }
+
+  return 0;
 }
 
 void *unpack_thread(void *pargs) {
@@ -299,14 +311,9 @@ void *unpack_thread(void *pargs) {
       printf("creating directory %s%s...\n", header.path_parent, header.path_rel);
     }
 
-    buffer = malloc(fsize);
-    if (read_block(args->in, buffer, fsize) < fsize) {
-      free(buffer);
-      fprintf(stderr, "error reading %s\n", header.path_rel);
+    if (write_file(&header, args->in, args->prefix) < 0) {
       goto end;
     }
-    write_file(&header, buffer, args->prefix);
-    free(buffer);
 
     // read padding
     if (fsize & (PSVIMG_ENTRY_ALIGN-1)) {
@@ -314,13 +321,13 @@ void *unpack_thread(void *pargs) {
     } else {
       padding = 0;
     }
-    buffer = malloc(padding);
-    if (read_block(args->in, buffer, padding) < padding) {
-      free(buffer);
-      fprintf(stderr, "error reading padding\n");
-      goto end;
+    while (padding --> 0) {
+      char ch;
+      if (read_block(args->in, &ch, 1) < 1) {
+        fprintf(stderr, "error reading padding\n");
+        goto end;
+      }
     }
-    free(buffer);
 
     // read tailer
     if (read_block(args->in, &tailer, sizeof(tailer)) < sizeof(tailer)) {

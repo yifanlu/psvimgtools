@@ -7,6 +7,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#define COPY_BLOCK_SIZE (1024)
+
 ssize_t read_block(int fd, void *buf, size_t nbyte) {
   ssize_t rd;
   size_t total;
@@ -34,6 +36,26 @@ ssize_t write_block(int fd, const void *buf, size_t nbyte) {
   }
   if (wr < 0) {
     return wr;
+  } else {
+    return total;
+  }
+}
+
+ssize_t copy_block(int fd_out, int fd_in, size_t nbyte) {
+  char buffer[COPY_BLOCK_SIZE];
+  ssize_t rd;
+  size_t total;
+
+  total = 0;
+  while (nbyte > 0 && (rd = read_block(fd_in, buffer, nbyte > sizeof(buffer) ? sizeof(buffer) : nbyte)) > 0) {
+    if (write_block(fd_out, buffer, rd) < rd) {
+      return -1;
+    }
+    total += rd;
+    nbyte -= rd;
+  }
+  if (rd < 0) {
+    return rd;
   } else {
     return total;
   }
