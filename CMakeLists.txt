@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 2.8)
 
 project(psvimgtools C)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 find_package(zlib REQUIRED)
 
 include_directories(${zlib_INCLUDE_DIRS})
