@@ -14,10 +14,9 @@
 #include <unistd.h>
 #include <utime.h>
 #include <zlib.h>
-#include "aes.h"
+#include "crypto.h"
 #include "backup.h"
 #include "endian-utils.h"
-#include "sha256.h"
 #include "psvimg.h"
 #include "utils.h"
 
@@ -27,7 +26,7 @@ void *encrypt_thread(void *pargs) {
   args_t *args = (args_t *)pargs;
   SHA256_CTX ctx, tmp;
   uint8_t iv[AES_BLOCK_SIZE];
-  uint8_t buffer[PSVIMG_BLOCK_SIZE + SHA256_MAC_LEN + 0x10];
+  uint8_t buffer[PSVIMG_BLOCK_SIZE + SHA256_BLOCK_SIZE + 0x10];
   ssize_t rd;
   union {
     struct {
@@ -50,9 +49,9 @@ void *encrypt_thread(void *pargs) {
   while ((rd = read_block(args->in, buffer, PSVIMG_BLOCK_SIZE)) > 0) {
     // generate hash
     sha256_update(&ctx, buffer, rd);
-    tmp = ctx;
+    sha256_copy(&tmp, &ctx);
     sha256_final(&tmp, &buffer[rd]);
-    rd += SHA256_MAC_LEN;
+    rd += SHA256_BLOCK_SIZE;
 
     // add padding
     if (footer.data.padding != 0) { // we should be reading 0x8000 blocks! only need padding once
@@ -348,7 +347,7 @@ void *pack_thread(void *pargs) {
   char host[MAX_PATH_LEN];
   char parent_file[MAX_PATH_LEN];
   int fd;
-  ssize_t wr;
+  ssize_t rd, wr;
   
   if ((dir = opendir(args->prefix)) == NULL) {
     fprintf(stderr, "cannot open %s\n", args->prefix);
@@ -372,11 +371,12 @@ void *pack_thread(void *pargs) {
         fprintf(stderr, "WARNING: skipping %s because VITA_PATH.TXT is not found!\n", host);
         continue;
       }
-      if (read_block(fd, parent, sizeof(parent)) < 0) {
+      if ((rd = read_block(fd, parent, sizeof(parent)-1)) < 0) {
         fprintf(stderr, "error reading %s\n", parent_file);
         goto end;
       }
       close(fd);
+      parent[rd] = '\0';
       dent = NULL; // so we don't actually reuse it
       printf("adding files for %s\n", parent);
       if ((wr = add_all_files(args->out, parent, "\0", host)) < 0) {

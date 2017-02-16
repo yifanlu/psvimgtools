@@ -12,18 +12,17 @@
 #include <unistd.h>
 #include <utime.h>
 #include <zlib.h>
-#include "aes.h"
+#include "crypto.h"
 #include "endian-utils.h"
 #include "restore.h"
-#include "sha256.h"
 #include "psvimg.h"
 #include "utils.h"
 
 #define MAX_PATH_LEN 1024
 
-static void print_hash(const char *title, uint8_t hash[SHA256_MAC_LEN]) {
+static void print_hash(const char *title, uint8_t hash[SHA256_BLOCK_SIZE]) {
   fprintf(stderr, "%s: ", title);
-  for (int i = 0; i < SHA256_MAC_LEN; i++) {
+  for (int i = 0; i < SHA256_BLOCK_SIZE; i++) {
     fprintf(stderr, "%02X", hash[i]);
   }
   fprintf(stderr, "\n");
@@ -34,8 +33,8 @@ void *decrypt_thread(void *pargs) {
   SHA256_CTX ctx, tmp;
   uint8_t iv[AES_BLOCK_SIZE];
   uint8_t next_iv[AES_BLOCK_SIZE];
-  uint8_t hash[SHA256_MAC_LEN];
-  uint8_t buffer[PSVIMG_BLOCK_SIZE + SHA256_MAC_LEN];
+  uint8_t hash[SHA256_BLOCK_SIZE];
+  uint8_t buffer[PSVIMG_BLOCK_SIZE + SHA256_BLOCK_SIZE];
   ssize_t rd, total;
 
   // read iv
@@ -65,18 +64,18 @@ void *decrypt_thread(void *pargs) {
     // In other words, we don't have to handle this edge case... for now.
 
     // validate hash
-    sha256_update(&ctx, buffer, rd - SHA256_MAC_LEN);
-    tmp = ctx;
+    sha256_update(&ctx, buffer, rd - SHA256_BLOCK_SIZE);
+    sha256_copy(&tmp, &ctx);
     sha256_final(&tmp, hash);
-    if (memcmp(&buffer[rd-SHA256_MAC_LEN], hash, SHA256_MAC_LEN) != 0) {
-      fprintf(stderr, "hash mismatch at offset 0x%zx, (buffer size 0x%zx)\n", total + rd - SHA256_MAC_LEN, rd);
-      print_hash("expected", &buffer[rd-SHA256_MAC_LEN]);
+    if (memcmp(&buffer[rd-SHA256_BLOCK_SIZE], hash, SHA256_BLOCK_SIZE) != 0) {
+      fprintf(stderr, "hash mismatch at offset 0x%zx, (buffer size 0x%zx)\n", total + rd - SHA256_BLOCK_SIZE, rd);
+      print_hash("expected", &buffer[rd-SHA256_BLOCK_SIZE]);
       print_hash("actual", hash);
       goto end;
     }
 
     // write output
-    write_block(args->out, buffer, rd - SHA256_MAC_LEN);
+    write_block(args->out, buffer, rd - SHA256_BLOCK_SIZE);
 
     memcpy(iv, next_iv, AES_BLOCK_SIZE);
     total += rd;
@@ -98,17 +97,17 @@ void *decrypt_thread(void *pargs) {
     goto end;
   }
   exp_padding += 0x10;
-  sha256_update(&ctx, buffer, rd - SHA256_MAC_LEN - exp_padding);
+  sha256_update(&ctx, buffer, rd - SHA256_BLOCK_SIZE - exp_padding);
   tmp = ctx;
   sha256_final(&tmp, hash);
-  if (memcmp(&buffer[rd-SHA256_MAC_LEN-exp_padding], hash, SHA256_MAC_LEN) != 0) {
-    fprintf(stderr, "hash mismatch at offset 0x%lx (final block), (buffer size 0x%zx)\n", total + rd - SHA256_MAC_LEN - exp_padding, rd);
-    print_hash("expected", &buffer[rd-SHA256_MAC_LEN]);
+  if (memcmp(&buffer[rd-SHA256_BLOCK_SIZE-exp_padding], hash, SHA256_BLOCK_SIZE) != 0) {
+    fprintf(stderr, "hash mismatch at offset 0x%lx (final block), (buffer size 0x%zx)\n", total + rd - SHA256_BLOCK_SIZE - exp_padding, rd);
+    print_hash("expected", &buffer[rd-SHA256_BLOCK_SIZE]);
     print_hash("actual", hash);
     goto end;
   }
 
-  write_block(args->out, buffer, rd - SHA256_MAC_LEN - exp_padding);
+  write_block(args->out, buffer, rd - SHA256_BLOCK_SIZE - exp_padding);
 
 end:
   close(args->out);
