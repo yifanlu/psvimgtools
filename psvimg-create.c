@@ -60,15 +60,17 @@ int main(int argc, const char *argv[]) {
       fprintf(stderr, "invalid metadata size\n");
       return 1;
     }
-    close(mfd);
     if (md.type != 2) {
       fprintf(stderr, "metadata type not supported\n");
+      close(mfd);
       return 1;
     }
     if (read_block(mfd, &md.add_data, sizeof(md.add_data)) < sizeof(md.add_data)) {
       fprintf(stderr, "invalid metadata size\n");
+      close(mfd);
       return 1;
     }
+    close(mfd);
   } else if (strcmp(argv[1], "-n") == 0) {
     memset(&md, 0, sizeof(md));
     md.magic = PSVMD_VER1_MAGIC;
@@ -81,7 +83,7 @@ int main(int argc, const char *argv[]) {
     }
     strncpy(md.name, argv[2], sizeof(md.name));
   } else {
-    fprintf(stderr, "you must specify either -m or -t!\n");
+    fprintf(stderr, "you must specify either -m or -n!\n");
     return 1;
   }
 
