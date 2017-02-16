@@ -4,27 +4,26 @@ project(psvimgtools C)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 find_package(zlib REQUIRED)
+find_package(LibGcrypt)
 
 include_directories(${zlib_INCLUDE_DIRS})
-
-# TODO: better check
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "(i386)|(x86)|(x86_64)|(X86)")
-    if(LINUX OR WIN32)
-        add_subdirectory(intel)
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DHAS_AESNI")
-        set(aesni_libs intel-aesni)
-    endif()
-endif()
+include_directories(${libgcrypt_INCLUDE_DIRS})
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -std=gnu99")
+if(${LIBGCRYPT_FOUND})
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DHAVE_LIBGCRYPT")
+else(${LIBGCRYPT_FOUND})
+  set(sw_crypto aes256.c sha256.c)
+  message(WARNING "libgcrypt was not found. Using slow software crypto.")
+endif(${LIBGCRYPT_FOUND})
 
-add_executable(psvimg-extract psvimg-extract.c restore.c aes256.c sha256.c utils.c)
-add_executable(psvmd-decrypt psvmd-decrypt.c restore.c aes256.c sha256.c utils.c)
-add_executable(psvimg-create psvimg-create.c backup.c aes256.c sha256.c utils.c)
+add_executable(psvimg-extract psvimg-extract.c restore.c utils.c ${sw_crypto})
+add_executable(psvmd-decrypt psvmd-decrypt.c restore.c utils.c ${sw_crypto})
+add_executable(psvimg-create psvimg-create.c backup.c utils.c ${sw_crypto})
 
-target_link_libraries(psvimg-extract ${zlib_LIBRARIES} ${aesni_libs})
-target_link_libraries(psvmd-decrypt ${zlib_LIBRARIES} ${aesni_libs})
-target_link_libraries(psvimg-create ${zlib_LIBRARIES} ${aesni_libs})
+target_link_libraries(psvimg-extract ${zlib_LIBRARIES} ${libgcrypt_LIBRARIES})
+target_link_libraries(psvmd-decrypt ${zlib_LIBRARIES} ${libgcrypt_LIBRARIES})
+target_link_libraries(psvimg-create ${zlib_LIBRARIES} ${libgcrypt_LIBRARIES})
 
 install(TARGETS psvimg-extract DESTINATION bin)
 install(TARGETS psvmd-decrypt DESTINATION bin)
