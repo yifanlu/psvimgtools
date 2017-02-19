@@ -34,6 +34,15 @@ static inline void aes256_cbc_encrypt(uint8_t *buffer, uint8_t *key, uint8_t *iv
   gcry_cipher_encrypt(ctx, buffer, blocks * AES_BLOCK_SIZE, NULL, 0);
   gcry_cipher_close(ctx);
 }
+
+static inline void aes256_encrypt(uint8_t *buffer, uint8_t *key) {
+  gcry_cipher_hd_t ctx;
+
+  gcry_cipher_open(&ctx, GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_ECB, 0);
+  gcry_cipher_setkey(ctx, key, 32);
+  gcry_cipher_encrypt(ctx, buffer, AES_BLOCK_SIZE, NULL, 0);
+  gcry_cipher_close(ctx);
+}
 #else // HAVE_GCRYPT
 #include "aes256.h"
 static inline void aes256_cbc_decrypt(uint8_t *buffer, uint8_t *key, uint8_t *iv, size_t blocks) {
@@ -59,6 +68,14 @@ static inline void aes256_cbc_encrypt(uint8_t *buffer, uint8_t *key, uint8_t *iv
     }
     aes256_encrypt_ecb(&ctx, &buffer[i * AES_BLOCK_SIZE]);
   }
+  aes256_done(&ctx);
+}
+
+static inline void aes256_encrypt(uint8_t *buffer, uint8_t *key) {
+  aes256_context ctx;
+
+  aes256_init(&ctx, key);
+  aes256_encrypt_ecb(&ctx, buffer);
   aes256_done(&ctx);
 }
 #endif // HAVE_GCRYPT
