@@ -81,11 +81,7 @@ static size_t psvDebugScreenEscape(const char *str){
 	return i;
 }
 
-int psvDebugScreenInit() {
-	psvDebugScreenMutex = sceKernelCreateMutex("log_mutex", 0, 0, NULL);
-	SceUID displayblock = sceKernelAllocMemBlock("display", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, SCREEN_FB_SIZE, NULL);
-	sceKernelGetMemBlockBase(displayblock, (void**)&psvDebugScreenFrameBuf.base);
-
+int psvDebugScreenSet() {
 	SceDisplayFrameBuf framebuf = {
 		.size = sizeof(framebuf),
 		.base = psvDebugScreenFrameBuf.base,
@@ -96,6 +92,14 @@ int psvDebugScreenInit() {
 	};
 
 	return sceDisplaySetFrameBuf(&framebuf, SCE_DISPLAY_SETBUF_NEXTFRAME);
+}
+
+int psvDebugScreenInit() {
+	psvDebugScreenMutex = sceKernelCreateMutex("log_mutex", 0, 0, NULL);
+	SceUID displayblock = sceKernelAllocMemBlock("display", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, SCREEN_FB_SIZE, NULL);
+	sceKernelGetMemBlockBase(displayblock, (void**)&psvDebugScreenFrameBuf.base);
+
+	return psvDebugScreenSet();
 }
 
 void psvDebugScreenClear(int bg_color){

@@ -23,8 +23,12 @@ add_executable(${SHORT_NAME}
 )
 
 target_link_libraries(${SHORT_NAME}
-  SceDisplay_stub
   taihen_stub
+  SceDisplay_stub
+  SceCtrl_stub
+  SceGxm_stub
+  SceAppUtil_stub
+  SceCommonDialog_stub
 )
 
 vita_create_self(${SHORT_NAME}.self ${SHORT_NAME} UNSAFE)
