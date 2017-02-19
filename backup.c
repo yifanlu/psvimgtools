@@ -313,6 +313,12 @@ static ssize_t add_all_files(int fd, const char *parent, const char *rel, const 
       continue;
     }
 
+#ifdef __APPLE__
+    if (strcmp(dent->d_name, ".DS_Store") == 0) {
+      continue; // ignore annoying OSX specific files
+    }
+#endif
+
     if (rel[0] == '\0' && strcmp(dent->d_name, "VITA_DATA.BIN") == 0) { // special file
       new_rel[0] = '\0';
     } else {
