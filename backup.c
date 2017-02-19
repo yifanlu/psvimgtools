@@ -38,8 +38,9 @@ void *encrypt_thread(void *pargs) {
   } footer;
 
   // write iv
-  write_block(args->out, args->iv, AES_BLOCK_SIZE);
   memcpy(iv, args->iv, AES_BLOCK_SIZE);
+  aes256_encrypt(iv, args->key);
+  write_block(args->out, iv, AES_BLOCK_SIZE);
 
   // encrypt blocks
   sha256_init(&ctx);
