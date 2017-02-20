@@ -31,7 +31,7 @@ install(TARGETS psvimg-create DESTINATION bin)
 
 if(${LIBGCRYPT_FOUND})
   add_executable(psvimg-keyfind psvimg-keyfind.c utils.c)
-  set_target_properties(psvimg-keyfind PROPERTIES COMPILE_FLAGS "-g")
+  set_target_properties(psvimg-keyfind PROPERTIES COMPILE_FLAGS "-O3")
   target_link_libraries(psvimg-keyfind ${LIBGCRYPT_LIBRARIES})
   install(TARGETS psvimg-keyfind DESTINATION bin)
 endif(${LIBGCRYPT_FOUND})
