@@ -42,7 +42,7 @@ static void print_progress(uint32_t total) {
   percent = total * 1.0 / 0x100000000LL;
   lpad = (int) (percent * PBWIDTH);
   rpad = PBWIDTH - lpad;
-  printf("\r%3d%% [%.*s%*s] (left: 0x%x)", (int)(percent * 100), lpad, PBSTR, rpad, "", ~total);
+  printf("\r%3d%% [%.*s%*s] (left: 0x%08x)", (int)(percent * 100), lpad, PBSTR, rpad, "", ~total);
   fflush(stdout);
 }
 
