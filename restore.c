@@ -97,17 +97,18 @@ void *decrypt_thread(void *pargs) {
     goto end;
   }
   exp_padding += 0x10;
-  sha256_update(&ctx, buffer, rd - SHA256_BLOCK_SIZE - exp_padding);
-  tmp = ctx;
-  sha256_final(&tmp, hash);
-  if (memcmp(&buffer[rd-SHA256_BLOCK_SIZE-exp_padding], hash, SHA256_BLOCK_SIZE) != 0) {
-    fprintf(stderr, "hash mismatch at offset 0x%lx (final block), (buffer size 0x%zx)\n", total + rd - SHA256_BLOCK_SIZE - exp_padding, rd);
-    print_hash("expected", &buffer[rd-SHA256_BLOCK_SIZE]);
-    print_hash("actual", hash);
-    goto end;
+  if (rd >= SHA256_BLOCK_SIZE + exp_padding) {
+    sha256_update(&ctx, buffer, rd - SHA256_BLOCK_SIZE - exp_padding);
+    tmp = ctx;
+    sha256_final(&tmp, hash);
+    if (memcmp(&buffer[rd-SHA256_BLOCK_SIZE-exp_padding], hash, SHA256_BLOCK_SIZE) != 0) {
+      fprintf(stderr, "hash mismatch at offset 0x%lx (final block), (buffer size 0x%zx)\n", total + rd - SHA256_BLOCK_SIZE - exp_padding, rd);
+      print_hash("expected", &buffer[rd-SHA256_BLOCK_SIZE]);
+      print_hash("actual", hash);
+      goto end;
+    }
+    write_block(args->out, buffer, rd - SHA256_BLOCK_SIZE - exp_padding);
   }
-
-  write_block(args->out, buffer, rd - SHA256_BLOCK_SIZE - exp_padding);
 
 end:
   close(args->out);

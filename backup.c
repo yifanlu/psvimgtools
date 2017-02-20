@@ -172,10 +172,9 @@ static void time_to_scetime(const time_t *time, SceDateTime *sce) {
   sce->minute = htole32(tmp->tm_min);
   sce->hour = htole32(tmp->tm_hour);
   sce->day = htole32(tmp->tm_mday);
-  sce->month = htole32(tmp->tm_mon) + 1;
-  sce->year = htole32(tmp->tm_year) + 1900;
+  sce->month = htole32(tmp->tm_mon + 1);
+  sce->year = htole32(tmp->tm_year + 1900);
   sce->microsecond = htole32(0);
-  memset(sce, 0, sizeof(*sce));
 }
 
 static int scestat(const char *path, SceIoStat *sce) {
@@ -233,7 +232,7 @@ static ssize_t add_file(int fd, const char *parent, const char *rel, const char 
   // create header
   memset(&header, PSVIMG_HEADER_FILLER, sizeof(header));
   header.systime = htole64(0);
-  header.unk_8 = htole64(0);
+  header.flags = htole64(0);
   if (scestat(host, &header.stat) < 0) {
     fprintf(stderr, "error getting stat for %s\n", host);
     return -1;
@@ -278,7 +277,7 @@ static ssize_t add_file(int fd, const char *parent, const char *rel, const char 
 
   // send tailer
   memset(&tailer, PSVIMG_TAILER_FILLER, sizeof(tailer));
-  tailer.unk_0 = htole64(0);
+  tailer.flags = htole64(0);
   memcpy(tailer.end, PSVIMG_ENDOFTAILER, sizeof(tailer.end));
   write_block(fd, &tailer, sizeof(tailer));
 
@@ -365,6 +364,12 @@ void *pack_thread(void *pargs) {
     if (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0) {
       continue;
     }
+
+#ifdef __APPLE__
+    if (strcmp(dent->d_name, ".DS_Store") == 0) {
+      continue; // ignore annoying OSX specific files
+    }
+#endif
 
     snprintf(host, sizeof(host), "%s/%s", args->prefix, dent->d_name);
     if (stat(host, &st) < 0) {

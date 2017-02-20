@@ -18,7 +18,7 @@
 
 #define MAX_PATH_LEN 1024
 
-static int need_psvinf(const char *title) {
+static int is_backup(const char *title) {
   if (strcmp(title, "app") == 0 ||
       strcmp(title, "patch") == 0 ||
       strcmp(title, "addcont") == 0 ||
@@ -73,15 +73,15 @@ int main(int argc, const char *argv[]) {
     close(mfd);
   } else if (strcmp(argv[1], "-n") == 0) {
     memset(&md, 0, sizeof(md));
-    md.magic = PSVMD_VER1_MAGIC;
+    strncpy(md.name, argv[2], sizeof(md.name));
+    md.magic = is_backup(md.name) ? PSVMD_BACKUP_MAGIC : PSVMD_CONTENT_MAGIC;
     md.type = 2;
-    md.unk_68 = 2;
+    md.version = 2;
     md.add_data = 1;
     srand(time(NULL));
     for (int i = 0; i < sizeof(md.iv); i++) {
       md.iv[i] = rand() % 0xFF;
     }
-    strncpy(md.name, argv[2], sizeof(md.name));
   } else {
     fprintf(stderr, "you must specify either -m or -n!\n");
     return 1;
@@ -211,7 +211,7 @@ int main(int argc, const char *argv[]) {
   fprintf(stderr, "created %s\n", path);
 
   // finally create the psvinf
-  if (need_psvinf(md.name)) {
+  if (is_backup(md.name)) {
     snprintf(path, sizeof(path), "%s/%s.psvinf", argv[6], md.name);
     mfd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     write_block(mfd, md.name, strnlen(md.name, 64) + 1);

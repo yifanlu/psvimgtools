@@ -8,8 +8,8 @@
 
 #include <stdint.h>
 
-#define PSVMD_VER1_MAGIC (0xFEE1900D)
-#define PSVMD_VER2_MAGIC (0xFEE1900E)
+#define PSVMD_CONTENT_MAGIC (0xFEE1900D)
+#define PSVMD_BACKUP_MAGIC (0xFEE1900E)
 #define PSVIMG_ENDOFHEADER "EndOfHeader\n"
 #define PSVIMG_ENDOFTAILER "EndOfTailer\n"
 #define PSVIMG_HEADER_FILLER ('x')
@@ -119,6 +119,8 @@ typedef struct SceIoStat {
   uint32_t  sst_private[6];
 } __attribute__((packed)) SceIoStat;
 
+#define PSVMD_FW_1_00 (0x01000000)
+
 typedef struct PsvMd {
   uint32_t magic;
   uint32_t type;
@@ -126,7 +128,7 @@ typedef struct PsvMd {
   uint8_t  psid[16];
   char     name[64];
   uint64_t psvimg_size;
-  uint64_t unk_68; // set to 2
+  uint64_t version; // only support 2
   uint64_t total_size;
   uint8_t  iv[16];
   uint64_t ux0_info;
@@ -136,9 +138,12 @@ typedef struct PsvMd {
   uint32_t add_data;
 } __attribute__((packed)) PsvMd_t;
 
+/** This file (and backup) can only be restored with the same PSID */
+#define PSVIMG_HEADER_FLAG_CONSOLE_UNIQUE (0x1)
+
 typedef struct PsvImgHeader {
   uint64_t  systime;
-  uint64_t  unk_8; // set to 0
+  uint64_t  flags;
   SceIoStat stat;
   char      path_parent[256];
   uint32_t  unk_16C; // set to 1
@@ -147,8 +152,11 @@ typedef struct PsvImgHeader {
   char      end[12];
 } __attribute__((packed)) PsvImgHeader_t;
 
+/** The file/directory will be _removed_ (not restored). */
+#define PSVIMG_TAILER_FLAG_REMOVE (0x1)
+
 typedef struct PsvImgTailer {
-  uint64_t  unk_0; // set to 0
+  uint64_t  flags;
   char      unused[1004];
   char      end[12];
 } __attribute__((packed)) PsvImgTailer_t;
