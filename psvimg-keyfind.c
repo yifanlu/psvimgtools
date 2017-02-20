@@ -3,6 +3,7 @@
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
  */
+#define _GNU_SOURCE
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -63,7 +64,7 @@ int find_key(int fd, uint32_t guess[KEY_LEN/sizeof(uint32_t)], int idx, uint8_t 
   uint8_t tmp[AES_BLOCK_SIZE];
   status_t st;
 
-  memset(&guess[idx], 0, KEY_LEN - idx * sizeof(uint32_t));
+  memset(guess, 0, KEY_LEN);
   memset(zeros, 0, sizeof(zeros));
   st.found = 0;
   gcry_cipher_open(&ctx, GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_ECB, 0);
