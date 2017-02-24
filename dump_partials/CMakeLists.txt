@@ -48,6 +48,8 @@ set_target_properties(kernel
   COMPILE_FLAGS "-D__VITA_KERNEL__"
 )
 
+add_dependencies(${SHORT_NAME} kernel)
+
 vita_create_self(kernel.skprx kernel
   UNSAFE
   CONFIG ${CMAKE_SOURCE_DIR}/kernel.yml
