@@ -46,9 +46,7 @@ target_link_libraries(kernel
 set_target_properties(kernel
   PROPERTIES LINK_FLAGS "-nostdlib"
   COMPILE_FLAGS "-D__VITA_KERNEL__"
-)
-
-add_dependencies(${SHORT_NAME} kernel)
+)(${SHORT_NAME} kernel)
 
 vita_create_self(kernel.skprx kernel
   UNSAFE
@@ -60,3 +58,5 @@ vita_create_vpk(${SHORT_NAME}.vpk ${VITA_TITLEID} ${SHORT_NAME}.self
   NAME ${VITA_APP_NAME}
   FILE ${CMAKE_CURRENT_BINARY_DIR}/kernel.skprx kernel.skprx
 )
+
+add_dependencies(${SHORT_NAME}.vpk kernel.skprx)
